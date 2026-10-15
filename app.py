@@ -81,14 +81,18 @@ training_materials = load_training_materials()
 # Strict system prompt embodying your exact rules
 system_prompt_content = (
     "You are an expert executive career coach reviewing student and professional CVs.\n"
-    "Your tone, warmth, rigor, and coaching style must strictly match the loaded training samples provided. Avoid all generic AI filler and corporate slop.\n\n"
+    "Your tone, rigor, and coaching style must strictly match the loaded training samples provided. Avoid all generic AI filler and corporate slop.\n\n"
     "CRITICAL GUIDELINES:\n"
     "1. NEVER MENTION THE MATRIX: Under no circumstances should you ever mention the words 'matrix', 'scoring matrix', or 'rubric'. All feedback must feel like personal, expert human coaching.\n"
     "2. NO REPEATED COMMENTS: Every single comment must be 100% unique and bespoke.\n"
     "3. CONTEXT-DEPENDENT: You MUST explicitly mention specific details, roles, companies, or projects (e.g., ISOC, Deloitte, Liskara, Wrestling, Forest School, GCSEs) in the text of each comment.\n"
     "4. NO HEADINGS ALLOWED: Never comment on section titles or headers. Comments must anchor strictly to individual bullet points, specific achievement entries, or specific target words/phrases.\n"
-    "5. SELECTIVE HIGH-IMPACT COVERAGE: Do not comment on every single line. Aim for roughly 40-75% of the most impactful bullet points across the document from top to bottom.\n"
-    "6. WHATSAPP SUMMARY: Provide a friendly, warm, conversational message with a balanced, medium-level summary of feedback. (Zero markdown asterisks, zero bolding, zero scores)."
+    "5. SELECTIVE HIGH-IMPACT COVERAGE: Aim for roughly 40-75% of the most impactful bullet points across the document from top to bottom.\n"
+    "6. WHATSAPP SUMMARY FORMAT:\n"
+    "   - Must start with a bland, generic opening line (e.g., 'It looks really good overall!'). No super positive or over-the-top summary praise.\n"
+    "   - Provide a concise medium-level overview of key areas to refine.\n"
+    "   - Must end with: 'Let me know if you have any questions and feel free to send a re-drafted version.'\n"
+    "   - Zero markdown asterisks, zero bolding, zero scores."
 )
 
 st.title("📱 WhatsApp & Docs CV Reviewer")
@@ -150,15 +154,17 @@ elif doc_url:
 if cv_target is not None and st.button("Generate Review"):
     with st.spinner("Analyzing full CV and generating bespoke coaching review..."):
         try:
-            # 1. Friendly, medium-detail WhatsApp summary
+            # 1. WhatsApp summary with bland opening and standard sign-off
             whatsapp_response = client.models.generate_content(
                 model='gemini-3.8-flash',
                 contents=training_materials + [
                     cv_target,
                     (
-                        "Write a warm, friendly, conversational WhatsApp review message to the candidate. "
-                        "Praise their overall profile, point out key strengths, and provide a medium-level overview of key areas to refine on their document. "
-                        "Do NOT mention the word matrix or rubric. Do NOT use markdown asterisks, bolding, or numerical scores."
+                        "Write a WhatsApp review message following these exact rules:\n"
+                        "1. Start with a bland, generic opening line (e.g., 'It looks really good overall!'). Do not include over-the-top praise.\n"
+                        "2. Provide a medium-level overview of key areas to refine.\n"
+                        "3. End with exactly: 'Let me know if you have any questions and feel free to send a re-drafted version.'\n"
+                        "4. Do NOT mention the word matrix or rubric. Do NOT use markdown asterisks, bolding, or numerical scores."
                     )
                 ],
                 config=types.GenerateContentConfig(
@@ -211,7 +217,6 @@ if cv_target is not None and st.button("Generate Review"):
                                 full_text = ep['text']
                                 target_phrase = item.get('target_phrase', '')
                                 
-                                # Default range: highlight target phrase if found, otherwise highlight first 20 chars
                                 start_offset = 0
                                 end_offset = len(full_text)
                                 
