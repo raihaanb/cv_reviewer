@@ -77,23 +77,22 @@ def load_training_materials():
 
 training_materials = load_training_materials()
 
-# Comprehensive system prompt matching your exact coaching voice, scoring matrix, and deep-dive expectations
+# System prompt enforcing concise casual WhatsApp text and rigorous scoring matrix document feedback
 system_prompt_content = (
-    "You are an expert executive career coach reviewing student and professional CVs. "
-    "Your tone must strictly match the style, warmth, and depth demonstrated in the sample feedback transcripts and scoring matrix PDF provided. "
-    "Provide an extensive, thorough, and highly encouraging review that covers every single part of the candidate's profile from top to bottom (Education, Work Experience, Leadership, Projects, and Skills).\n\n"
-    "Core Guidelines & Rules:\n"
-    "1. WHATSAPP SUMMARY: Write a rich, warm, conversational, and highly detailed message (just like your past successful reviews), praising their strengths while giving structured, actionable advice across sections. No markdown asterisks, bolding, or scores.\n"
-    "2. GOOGLE DOCS COMMENTS: Provide robust, detailed, professional bullet-pointed feedback evaluating every major section against the scoring matrix, explicitly highlighting what is strong, what is important, and what is lacking.\n"
-    "3. GCSEs and A-levels must always be kept on the CV, restricted strictly to a single line rather than dropped or split across multiple lines.\n"
-    "4. Check for timeline consistency, clear dates, robust action verbs, and quantitative commercial metrics."
+    "You are an expert executive career coach reviewing CVs. "
+    "Your tone and feedback style must strictly match the training samples and scoring matrix PDF provided.\n\n"
+    "CRITICAL RULES:\n"
+    "1. WHATSAPP MESSAGE: Keep it short, casual, and direct. NO excessive AI praise or fluff at the start. Just state that the CV looks solid and that detailed feedback has been left directly in the Google Doc. (Zero markdown, zero bolding, zero scores).\n"
+    "2. GOOGLE DOCS COMMENTS: This is where all the rigorous, detailed, professional bullet-pointed evaluation goes, covering every section from top to bottom against the scoring matrix (highlighting strengths, what is important, and what is lacking).\n"
+    "3. GCSEs and A-levels must always be kept on the CV, restricted strictly to a single line.\n"
+    "4. Check for timeline consistency, clear dates, action verbs, and quantitative commercial metrics."
 )
 
 st.title("📱 WhatsApp & Docs CV Reviewer")
-st.write("Upload a CV or paste a native Google Doc link for a comprehensive, matrix-driven review.")
+st.write("Upload a CV or paste a native Google Doc link for a concise WhatsApp note and deep-dive rubric comments.")
 
 uploaded_file = st.file_uploader("Upload Candidate CV (PDF or TXT)", type=["pdf", "txt"])
-doc_url = st.text_input("Or paste native Google Doc Link (Optional - adds detailed inline comments across the whole doc)")
+doc_url = st.text_input("Or paste native Google Doc Link (Optional - adds up to 10 detailed inline comments)")
 
 cv_target = None
 
@@ -127,15 +126,15 @@ elif doc_url:
         st.error("Google Service Account credentials missing in Streamlit secrets!")
         st.stop()
 
-if cv_target is not None and st.button("Generate Comprehensive Review"):
-    with st.spinner("Conducting full-document deep dive against scoring matrix and training feedback..."):
+if cv_target is not None and st.button("Generate Review"):
+    with st.spinner("Conducting full-document review against scoring matrix..."):
         try:
             contents_payload = training_materials + [
                 cv_target,
                 (
-                    "Perform a meticulous, complete review of this CV from top to bottom against the attached scoring matrix PDF and training samples. Provide:\n"
-                    "1. WHATSAPP SUMMARY: A rich, warm, conversational, and highly detailed coach review message (no markdown, no bolding, no scores).\n"
-                    "2. DOCUMENT COMMENTS MAP: Detailed, professional improvement notes covering Education, Work Experience, Leadership, Projects, and Skills."
+                    "Review this CV against the attached scoring matrix PDF and training samples. Provide two distinct sections:\n"
+                    "1. WHATSAPP_SUMMARY: A short, casual, punchy text message (no AI praise, no markdown, no bolding).\n"
+                    "2. DETAILED_FEEDBACK_MAP: Rigorous, bullet-pointed feedback evaluating all sections (Education, Experience, Leadership, Projects, Skills) against the scoring matrix."
                 )
             ]
             
@@ -148,11 +147,18 @@ if cv_target is not None and st.button("Generate Comprehensive Review"):
                 )
             )
             
-            st.success("Deep-Dive Review Complete!")
-            st.subheader("WhatsApp Text Output:")
-            st.text_area("Copy message below:", value=response.text, height=350)
+            raw_output = response.text
+            whatsapp_part = raw_output
             
-            # If a Google Doc URL was provided, scan the entire document paragraphs and anchor detailed comments across all sections
+            if "WHATSAPP_SUMMARY" in raw_output and "DETAILED_FEEDBACK_MAP" in raw_output:
+                parts = raw_output.split("DETAILED_FEEDBACK_MAP")
+                whatsapp_part = parts[0].replace("WHATSAPP_SUMMARY", "").strip()
+            
+            st.success("Review Complete!")
+            st.subheader("WhatsApp Text Output (Short & Direct):")
+            st.text_area("Copy message below:", value=whatsapp_part, height=150)
+            
+            # If a Google Doc URL was provided, scan the entire document paragraphs and anchor up to 10 detailed comments across all sections
             if doc_url:
                 try:
                     docs_svc, _ = get_gdocs_service()
@@ -162,7 +168,6 @@ if cv_target is not None and st.button("Generate Comprehensive Review"):
                     doc_content = document.get('body').get('content')
                     requests = []
                     
-                    # Scan all paragraphs in the document to find matching content across the WHOLE CV
                     for element in doc_content:
                         if 'paragraph' in element:
                             p_text = ""
@@ -174,42 +179,41 @@ if cv_target is not None and st.button("Generate Comprehensive Review"):
                                     p_text += elem['textRun'].get('content')
                             
                             cleaned = p_text.strip()
-                            if len(cleaned) > 15:  # Valid content line
+                            if len(cleaned) > 15:
                                 line_lower = cleaned.lower()
                                 comment_to_add = None
                                 
-                                # Map to appropriate section criteria based on training matrix
                                 if any(kw in line_lower for kw in ["education", "university", "school", "a-level", "gcse", "degree"]):
                                     comment_to_add = (
-                                        "Education & Academic Rubric Feedback:\n"
-                                        "• Ensure high school qualifications (GCSEs and A-levels) are consolidated strictly onto a single line.\n"
-                                        "• Highlight top-decile rankings, academic prizes, or relevant high-tier modules clearly."
+                                        "Education Feedback (Scoring Matrix):\n"
+                                        "• Consolidate A-levels and GCSEs strictly onto a single line to save vertical space.\n"
+                                        "• Highlight top-decile rankings, academic prizes, or relevant modules."
                                     )
-                                elif any(kw in line_lower for kw in ["experience", "intern", "analyst", "associate", "consultant", "deloitte", "liskara", "trainer"]):
+                                elif any(kw in line_lower for kw in ["deloitte", "liskara", "trainer", "intern", "analyst"]):
                                     comment_to_add = (
-                                        "Work Experience Rubric Feedback:\n"
+                                        "Work Experience Feedback (Scoring Matrix):\n"
                                         "• Lead every bullet point with strong action verbs and robust commercial metrics (revenue, efficiency %, funding).\n"
-                                        "• Avoid standalone company background sentences; fold context directly into impact bullets."
+                                        "• Fold standalone company background descriptions directly into impact bullets."
                                     )
-                                elif any(kw in line_lower for kw in ["leadership", "president", "society", "committee", "captain", "founder", "lead", "initiative"]):
+                                elif any(kw in line_lower for kw in ["islamic society", "leadership", "president", "consulting", "wrestling", "founder", "lead"]):
                                     comment_to_add = (
-                                        "Leadership & Impact Rubric Feedback:\n"
+                                        "Leadership & Impact Feedback (Scoring Matrix):\n"
                                         "• Emphasize scale metrics (team size, funds raised, attendees).\n"
-                                        "• Keep descriptions punchy and concise (maximum 2 lines per bullet)."
+                                        "• Keep descriptions concise and punchy (max 2 lines)."
                                     )
-                                elif any(kw in line_lower for kw in ["project", "research", "app", "model", "analysis"]):
+                                elif any(kw in line_lower for kw in ["project", "research", "app", "model"]):
                                     comment_to_add = (
-                                        "Projects Rubric Feedback:\n"
+                                        "Projects Feedback (Scoring Matrix):\n"
                                         "• Include names of specific tools, technical libraries, or software used.\n"
-                                        "• Quantify the success or output of the project where possible."
+                                        "• Quantify success or output where possible."
                                     )
-                                elif any(kw in line_lower for kw in ["skills", "interests", "languages", "software", "excel"]):
+                                elif any(kw in line_lower for kw in ["skills", "interests", "languages", "excel"]):
                                     comment_to_add = (
-                                        "Skills & Technical Rubric Feedback:\n"
+                                        "Skills & Technical Feedback (Scoring Matrix):\n"
                                         "• Include a dedicated hard skills line (e.g., Advanced Excel, financial modelling, Python, data tools) to avoid automated screening filters."
                                     )
                                 
-                                if comment_to_add and len(requests) < 6:  # Ensure we anchor across multiple distinct sections
+                                if comment_to_add and len(requests) < 10:  # Allow up to 10 comments across the doc
                                     requests.append({
                                         'insertComment': {
                                             'content': comment_to_add,
@@ -225,7 +229,7 @@ if cv_target is not None and st.button("Generate Comprehensive Review"):
                             documentId=doc_id,
                             body={'requests': requests}
                         ).execute()
-                        st.success("Successfully posted thorough, matrix-driven feedback comments across the entire Google Doc!")
+                        st.success(f"Successfully posted {len(requests)} detailed, matrix-driven feedback comments across your Google Doc!")
                     else:
                         st.info("Review complete, but no matching section paragraphs were found for inline comments.")
                 except Exception as doc_update_err:
