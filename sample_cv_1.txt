@@ -1,0 +1,10 @@
+Education Section:
+- Put something else apart from modules under education; include projects, exam results, and explain what honors mean (e.g., explicitly explain that making the Dean's List means being in the top 10%, etc.).
+
+Professional and Leadership Experience:
+- Underneath professional and leadership experience, you need a lot more figures and impact. 
+- For engineering/technical roles (e.g., semiconductor temperature reduction): i.e., how did you reduce the semiconductor temperature? What impact did that have?
+- For coding/data roles (e.g., Python): what impact did your python coding have? Did it improve fintech sales by 59%, cut processing time, etc.?
+
+Youth Project & Leadership:
+- Start with numbers for your youth project. HOW did you increase attendance from 20 to 70? What specific actions did you take?
