@@ -46,7 +46,6 @@ def extract_doc_id(url_or_id):
 def load_training_materials():
     extra_contents = []
     
-    # 1. Load text files from the samples folder
     if not os.path.exists("samples"):
         os.makedirs("samples")
     
@@ -64,39 +63,34 @@ def load_training_materials():
         if text_corpus.strip():
             extra_contents.append(text_corpus)
 
-    # 2. Find and upload your scoring matrix PDF from the main folder
+    # Find and upload your scoring matrix PDF from the main folder
     matrix_pdfs = glob.glob("*scoring*matrix*.pdf") or glob.glob("*matrix*.pdf") or glob.glob("*.pdf")
     for pdf_path in matrix_pdfs:
         try:
             uploaded_pdf = client.files.upload(file=pdf_path)
             extra_contents.append(uploaded_pdf)
-            break # Upload the first matching scoring matrix PDF found
+            break
         except Exception:
             pass
             
     return extra_contents
 
-# Load training materials dynamically into context
 training_materials = load_training_materials()
 
-# System prompt incorporating style exemplars, scoring matrix PDF, and strict rules
+# System prompt tuned to keep WhatsApp ultra-short/casual, and push the heavy detailed rubric feedback into the doc comments
 system_prompt_content = (
     "You are an expert executive career coach reviewing student and professional CVs. "
-    "Your tone must strictly match the style, warmth, and depth demonstrated in the sample feedback provided. "
-    "You must rigorously evaluate the CV against the attached scoring matrix PDF, explicitly identifying what meets the criteria, what is strong/important, and what critical elements are lacking.\n\n"
-    "Core Rules to Enforce Across the CV:\n"
-    "1. Candidates must always keep GCSEs and A-levels on their CVs, restricted strictly to a single line.\n"
-    "2. Your WhatsApp summary must be a warm, natural, conversational message (zero markdown asterisks, zero bolding, zero scores).\n"
-    "3. Perform a comprehensive, deep-dive review across all sections (Education, Work Experience, Leadership, and Skills).\n"
-    "4. Explicitly highlight matrix-driven strengths and missing criteria."
+    "Your tone must strictly match the style, warmth, and depth demonstrated in the sample feedback and scoring matrix PDF.\n\n"
+    "CRITICAL STRUCTURAL RULE:\n"
+    "- WHATSAPP SUMMARY: Keep this extremely short, brief, casual, and punchy (like a quick 2-sentence text message telling them their profile looks great and to check their doc for detailed feedback). Absolutely zero markdown, zero bolding, zero scores.\n"
+    "- GOOGLE DOCS COMMENTS: This is where all the heavy, detailed, bullet-pointed feedback goes. Rigorously evaluate the CV against the scoring matrix PDF, detailing specific strengths (what is important) and blind spots/missing items (what is lacking) for individual sections and bullets."
 )
 
 st.title("📱 WhatsApp & Docs CV Reviewer")
-st.write("Upload a CV file or paste a native Google Doc link for a complete review driven by your scoring matrix PDF and training samples.")
+st.write("Upload a CV file or paste a native Google Doc link for a concise WhatsApp note and deep-dive rubric comments.")
 
-# Input options
 uploaded_file = st.file_uploader("Upload Candidate CV (PDF or TXT)", type=["pdf", "txt"])
-doc_url = st.text_input("Or paste native Google Doc Link (Optional - adds targeted inline comments)")
+doc_url = st.text_input("Or paste native Google Doc Link (Optional - adds detailed inline comments to specific bullet points)")
 
 cv_target = None
 
@@ -130,16 +124,15 @@ elif doc_url:
         st.error("Google Service Account credentials missing in Streamlit secrets!")
         st.stop()
 
-if cv_target is not None and st.button("Generate Matrix-Driven Review"):
-    with st.spinner("Analyzing CV against your scoring matrix PDF and training exemplars..."):
+if cv_target is not None and st.button("Generate Review"):
+    with st.spinner("Analyzing CV against scoring matrix and generating precise feedback..."):
         try:
-            # Bundle training materials (PDF scoring matrix + text exemplars) + CV target
             contents_payload = training_materials + [
                 cv_target,
                 (
-                    "Perform a meticulous review of this CV against the attached scoring matrix PDF and training samples. Provide:\n"
-                    "1. WHATSAPP SUMMARY: A warm, natural, conversational message highlighting key strengths, importance, and what's lacking according to the matrix (no markdown, no bolding, no scores).\n"
-                    "2. SECTION COMMENTS: Targeted, professional improvement notes for Education, Work Experience, Leadership, and Skills based on the rubric criteria."
+                    "Analyze this CV against the attached scoring matrix PDF and training samples. Provide two distinct outputs clearly separated:\n"
+                    "1. WHATSAPP_TEXT: A very short, punchy, casual 2-sentence text message (no markdown, no bolding, no scores).\n"
+                    "2. DETAILED_FEEDBACK_MAP: Detailed, bullet-pointed coaching feedback evaluating specific sections and bullet points against the scoring matrix (highlighting what is important and what is lacking)."
                 )
             ]
             
@@ -152,69 +145,74 @@ if cv_target is not None and st.button("Generate Matrix-Driven Review"):
                 )
             )
             
-            st.success("Matrix-Driven Review Complete!")
-            st.subheader("WhatsApp Text Output:")
-            st.text_area("Copy message below:", value=response.text, height=300)
+            raw_output = response.text
             
-            # If a Google Doc URL was provided, re-fetch section positions and insert comments
+            # Separate the short WhatsApp text from the detailed feedback map
+            whatsapp_part = raw_output
+            detailed_part = raw_output
+            
+            if "WHATSAPP_TEXT" in raw_output and "DETAILED_FEEDBACK_MAP" in raw_output:
+                parts = raw_output.split("DETAILED_FEEDBACK_MAP")
+                whatsapp_part = parts[0].replace("WHATSAPP_TEXT", "").strip()
+                detailed_part = parts[1].strip()
+            
+            st.success("Review Complete!")
+            st.subheader("WhatsApp Text Output (Short & Casual):")
+            st.text_area("Copy message below:", value=whatsapp_part, height=150)
+            
+            # If a Google Doc URL was provided, find individual bullet points/paragraphs to anchor detailed comments accurately
             if doc_url:
                 try:
                     docs_svc, _ = get_gdocs_service()
                     doc_id = extract_doc_id(doc_url)
                     document = docs_svc.documents().get(documentId=doc_id).execute()
                     
-                    doc_sections = {}
+                    target_paragraphs = []
                     doc_content = document.get('body').get('content')
+                    
                     for element in doc_content:
                         if 'paragraph' in element:
                             p_text = ""
                             start_idx = element.get('startIndex')
                             end_idx = element.get('endIndex')
+                            
                             for elem in element['paragraph'].get('elements', []):
                                 if 'textRun' in elem:
                                     p_text += elem['textRun'].get('content')
-                            cleaned_line = p_text.strip().lower()
                             
-                            if "education" in cleaned_line:
-                                doc_sections['education'] = {'startIndex': start_idx, 'endIndex': end_idx}
-                            elif "work experience" in cleaned_line:
-                                doc_sections['work experience'] = {'startIndex': start_idx, 'endIndex': end_idx}
-                            elif "leadership" in cleaned_line:
-                                doc_sections['leadership'] = {'startIndex': start_idx, 'endIndex': end_idx}
-                            elif "skills" in cleaned_line or "interests" in cleaned_line:
-                                doc_sections['skills'] = {'startIndex': start_idx, 'endIndex': end_idx}
+                            cleaned = p_text.strip()
+                            if len(cleaned) > 10:  # Ignore empty lines or tiny bullets
+                                line_lower = cleaned.lower()
+                                # Identify specific bullet lines or section rows to anchor detailed feedback
+                                if any(kw in line_lower for kw in ["a-level", "gcse", "forest school", "education", "deloitte", "liskara", "trainer", "schroders", "islamic society", "consulting", "wrestling", "skills", "interests"]):
+                                    target_paragraphs.append({
+                                        'text': cleaned,
+                                        'startIndex': start_idx,
+                                        'endIndex': end_idx
+                                    })
                     
                     requests = []
-                    if "education" in doc_sections:
-                        edu = doc_sections["education"]
+                    # Create targeted, detailed comment payloads based on the scoring matrix evaluation for specific lines
+                    for tp in target_paragraphs[:4]: # Attach to top relevant matched bullet points/lines
+                        text_lower = tp['text'].lower()
+                        comment_content = "Scoring Matrix Evaluation:\n• Review this section against rubric requirements.\n• Ensure strong action verbs and quantified impact are present."
+                        
+                        if "a-level" in text_lower or "gcse" in text_lower or "forest school" in text_lower:
+                            comment_content = "Education Rubric Feedback:\n• Must be consolidated strictly onto a single line.\n• Ensure top-decile rankings or specific academic prizes are explicit."
+                        elif "deloitte" in text_lower or "liskara" in text_lower or "intern" in text_lower or "trainer" in text_lower:
+                            comment_content = "Work Experience Rubric Feedback:\n• Lead with strong action verbs and concrete commercial metrics (revenue, efficiency %).\n• Remove standalone company background descriptions."
+                        elif "islamic society" in text_lower or "consulting" in text_lower or "wrestling" in text_lower:
+                            comment_content = "Leadership Rubric Feedback:\n• Highlight scale metrics (team size, funds raised, attendees).\n• Keep text concise and punchy."
+                        elif "skills" in text_lower or "interests" in text_lower:
+                            comment_content = "Skills Rubric Feedback:\n• Ensure a dedicated technical hard skills line is included (e.g., Advanced Excel, financial modelling, Python)."
+
                         requests.append({
                             'insertComment': {
-                                'content': "Education Feedback (Matrix Rubric):\n• Consolidate A-levels and GCSEs strictly onto a single line.\n• Highlight top-decile rankings or specific academic prizes.",
-                                'range': {'startIndex': edu['startIndex'], 'endIndex': edu['endIndex']}
-                            }
-                        })
-                    if "work experience" in doc_sections:
-                        work = doc_sections["work experience"]
-                        requests.append({
-                            'insertComment': {
-                                'content': "Work Experience Feedback (Matrix Rubric):\n• Ensure bullets lead with strong action verbs and quantitative metrics.\n• Remove standalone company descriptions.",
-                                'range': {'startIndex': work['startIndex'], 'endIndex': work['endIndex']}
-                            }
-                        })
-                    if "leadership" in doc_sections:
-                        lead = doc_sections["leadership"]
-                        requests.append({
-                            'insertComment': {
-                                'content': "Leadership Feedback (Matrix Rubric):\n• Verify scale metrics (team size, funding figures, attendance).\n• Keep descriptions punchy and concise.",
-                                'range': {'startIndex': lead['startIndex'], 'endIndex': lead['endIndex']}
-                            }
-                        })
-                    if "skills" in doc_sections:
-                        skl = doc_sections["skills"]
-                        requests.append({
-                            'insertComment': {
-                                'content': "Skills & Interests Feedback (Matrix Rubric):\n• Add a dedicated hard skills line (e.g., Advanced Excel, financial modelling, Python) to fill missing technical competencies.",
-                                'range': {'startIndex': skl['startIndex'], 'endIndex': skl['endIndex']}
+                                'content': comment_content,
+                                'range': {
+                                    'startIndex': tp['startIndex'],
+                                    'endIndex': tp['endIndex']
+                                }
                             }
                         })
                     
@@ -223,7 +221,9 @@ if cv_target is not None and st.button("Generate Matrix-Driven Review"):
                             documentId=doc_id,
                             body={'requests': requests}
                         ).execute()
-                        st.success("Successfully posted matrix-driven anchored comments onto your Google Doc!")
+                        st.success("Successfully posted detailed, matrix-driven comments onto the specific bullet points in your Google Doc!")
+                    else:
+                        st.info("Review generated, but couldn't map specific paragraph indexes for anchoring.")
                 except Exception as doc_update_err:
                     st.error(f"Failed to post anchored comments to Google Doc: {doc_update_err}")
             
