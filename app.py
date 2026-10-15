@@ -191,4 +191,66 @@ if cv_target is not None and st.button("Generate Review"):
                     bullets_payload.append(
                         "\nINSTRUCTIONS FOR INLINE COMMENTS:\n"
                         "1. Select the most impactful bullet points (aim for roughly 50% to 75% of the total entries list, skipping less critical lines).\n"
-                        "2. For each selected entry, identify a specific target phrase or key word within that line (e.g., 'A-Levels', 'Del
+                        "2. For each selected entry, identify a specific target phrase or key word within that line (e.g., A-Levels, Deloitte, LiDAR, Islamic Society, or a specific metric) to highlight.\n"
+                        "3. Write a completely unique, context-dependent coaching comment. NEVER mention the word matrix, rubric, or dates.\n"
+                        "4. Return strictly a JSON array of objects with keys: "
+                        "'index' (int), 'target_phrase' (string - exact snippet from the text to highlight), and 'comment' (string)."
+                    )
+                    
+                    comment_response = client.models.generate_content(
+                        model='gemini-3.8-flash',
+                        contents=training_materials + bullets_payload,
+                        config=types.GenerateContentConfig(
+                            system_instruction=system_prompt_content,
+                            response_mime_type="application/json",
+                            temperature=0.7
+                        )
+                    )
+                    
+                    comment_data = json.loads(comment_response.text)
+                    requests = []
+                    
+                    for item in comment_data:
+                        if 'index' in item and 'comment' in item:
+                            idx = item['index']
+                            if 0 <= idx < len(extracted_paragraphs):
+                                ep = extracted_paragraphs[idx]
+                                full_text = ep['text']
+                                target_phrase = item.get('target_phrase', '')
+                                
+                                start_offset = 0
+                                end_offset = len(full_text)
+                                
+                                if target_phrase and target_phrase in full_text:
+                                    match_start = full_text.find(target_phrase)
+                                    start_offset = match_start
+                                    end_offset = match_start + len(target_phrase)
+                                else:
+                                    end_offset = min(25, len(full_text))
+                                
+                                anchor_start = ep['startIndex'] + start_offset
+                                anchor_end = ep['startIndex'] + end_offset
+                                
+                                requests.append({
+                                    'insertComment': {
+                                        'content': item['comment'],
+                                        'range': {
+                                            'startIndex': anchor_start,
+                                            'endIndex': anchor_end
+                                        }
+                                    }
+                                })
+                    
+                    if requests:
+                        docs_svc.documents().batchUpdate(
+                            documentId=doc_id,
+                            body={'requests': requests}
+                        ).execute()
+                        st.success(f"Successfully posted {len(requests)} targeted, word-highlighted inline comments on your Google Doc!")
+                    else:
+                        st.info("Review complete, but no comments were returned.")
+                except Exception as doc_update_err:
+                    st.error(f"Failed to post anchored comments to Google Doc: {doc_update_err}")
+            
+        except Exception as e:
+            st.error(f"An error occurred during generation: {e}")
