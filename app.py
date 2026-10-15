@@ -78,25 +78,24 @@ def load_training_materials():
 
 training_materials = load_training_materials()
 
-# System prompt strictly enforcing your 6 CORE RULES
+# Strict system prompt embodying your exact rules
 system_prompt_content = (
     "You are an expert executive career coach reviewing student and professional CVs.\n"
-    "Your tone, rigor, and coaching style must strictly match the loaded training samples and scoring matrix PDF provided. Avoid all generic AI filler and corporate slop.\n\n"
-    "CRITICAL CORE RULES:\n"
-    "1. NEVER REPEAT ANY BULLET COMMENTS: Every comment must be 100% unique. Zero boilerplate or repeated feedback.\n"
-    "2. ALL COMMENTS MUST BE CONTEXT-DEPENDENT: You MUST explicitly mention specific details, roles, companies, or projects (e.g., ISOC, Deloitte, Liskara, Wrestling, Forest School, GCSEs) in the text of each comment.\n"
-    "3. READ AND COVER THE WHOLE CV: Review the candidate's document from top to bottom across all sections (Education, Work Experience, Leadership, Projects, and Skills).\n"
-    "4. NOT GENERIC, BASED ON TRAINING: Feedback must align with the coaching philosophy and standards set out in the attached exemplars and scoring matrix.\n"
-    "5. SPECIFIC POINTS (NO HEADINGS): Never comment on section titles or headers (e.g. 'Work Experience', 'Education'). Comments must anchor strictly to individual bullet points and specific achievement entries.\n"
-    "6. NO LIMITS ON NUMBER OF COMMENTS: Every qualifying bullet point across the document should receive a dedicated comment.\n"
-    "7. WHATSAPP SUMMARY: Keep it short, casual, and direct. NO excessive AI praise or fluff at the start. State that the CV looks solid and that detailed feedback has been left directly in the Google Doc. (Zero markdown asterisks, zero bolding, zero scores)."
+    "Your tone, warmth, rigor, and coaching style must strictly match the loaded training samples provided. Avoid all generic AI filler and corporate slop.\n\n"
+    "CRITICAL GUIDELINES:\n"
+    "1. NEVER MENTION THE MATRIX: Under no circumstances should you ever mention the words 'matrix', 'scoring matrix', or 'rubric'. All feedback must feel like personal, expert human coaching.\n"
+    "2. NO REPEATED COMMENTS: Every single comment must be 100% unique and bespoke.\n"
+    "3. CONTEXT-DEPENDENT: You MUST explicitly mention specific details, roles, companies, or projects (e.g., ISOC, Deloitte, Liskara, Wrestling, Forest School, GCSEs) in the text of each comment.\n"
+    "4. NO HEADINGS ALLOWED: Never comment on section titles or headers. Comments must anchor strictly to individual bullet points, specific achievement entries, or specific target words/phrases.\n"
+    "5. SELECTIVE HIGH-IMPACT COVERAGE: Do not comment on every single line. Aim for roughly 40-75% of the most impactful bullet points across the document from top to bottom.\n"
+    "6. WHATSAPP SUMMARY: Provide a friendly, warm, conversational message with a balanced, medium-level summary of feedback. (Zero markdown asterisks, zero bolding, zero scores)."
 )
 
 st.title("📱 WhatsApp & Docs CV Reviewer")
-st.write("Upload a CV or paste a native Google Doc link for a concise WhatsApp note and bespoke rubric comments.")
+st.write("Upload a CV or paste a native Google Doc link for a warm WhatsApp review and targeted inline comments.")
 
 uploaded_file = st.file_uploader("Upload Candidate CV (PDF or TXT)", type=["pdf", "txt"])
-doc_url = st.text_input("Or paste native Google Doc Link (Optional - adds bespoke inline comments across the whole doc)")
+doc_url = st.text_input("Or paste native Google Doc Link (Optional - adds targeted inline comments across key bullet points)")
 
 cv_target = None
 extracted_paragraphs = []
@@ -128,10 +127,8 @@ elif doc_url:
                             p_text += elem['textRun'].get('content')
                     
                     cleaned = p_text.strip()
-                    # Filter out short lines, headers, or empty spaces to isolate actual bullets and achievement entries
                     if len(cleaned) > 15:
                         lower_c = cleaned.lower()
-                        # Strict rule 5: Filter out section titles and headers
                         is_header = cleaned.isupper() or (any(h in lower_c for h in ["education", "work experience", "leadership and impact", "skills and interests", "projects", "modules"]) and len(cleaned) < 35)
                         if not is_header:
                             extracted_paragraphs.append({
@@ -144,23 +141,24 @@ elif doc_url:
                     
             cv_target = f"Review this complete CV text content extracted from a Google Doc:\n{cv_text_content}"
         except Exception as fetch_err:
-            st.error(f"Failed to fetch Google Doc. Make sure it is a native Google Doc and shared with your service account email as an Editor! Details: {fetch_err}")
+            st.error(f"Failed to fetch Google Doc: {fetch_err}")
             st.stop()
     else:
         st.error("Google Service Account credentials missing in Streamlit secrets!")
         st.stop()
 
-if cv_target is not None and st.button("Generate Matrix-Driven Review"):
-    with st.spinner("Analyzing full CV against scoring matrix and training exemplars..."):
+if cv_target is not None and st.button("Generate Review"):
+    with st.spinner("Analyzing full CV and generating bespoke coaching review..."):
         try:
-            # 1. Generate the concise WhatsApp summary message
+            # 1. Friendly, medium-detail WhatsApp summary
             whatsapp_response = client.models.generate_content(
                 model='gemini-3.8-flash',
                 contents=training_materials + [
                     cv_target,
                     (
-                        "Write a short, casual, direct WhatsApp message to the candidate stating their CV looks solid and that detailed feedback has been left directly on their Google Doc. "
-                        "Do not include generic AI praise or fluff at the start. Do not use markdown, bolding, or scores."
+                        "Write a warm, friendly, conversational WhatsApp review message to the candidate. "
+                        "Praise their overall profile, point out key strengths, and provide a medium-level overview of key areas to refine on their document. "
+                        "Do NOT mention the word matrix or rubric. Do NOT use markdown asterisks, bolding, or numerical scores."
                     )
                 ],
                 config=types.GenerateContentConfig(
@@ -170,25 +168,26 @@ if cv_target is not None and st.button("Generate Matrix-Driven Review"):
             )
             
             st.success("Review Complete!")
-            st.subheader("WhatsApp Text Output (Short & Direct):")
-            st.text_area("Copy message below:", value=whatsapp_response.text, height=150)
+            st.subheader("WhatsApp Text Output:")
+            st.text_area("Copy message below:", value=whatsapp_response.text, height=250)
             
-            # 2. Generate 100% bespoke, non-repeating comments for EVERY extracted bullet point across the document
+            # 2. Generate selective (~40-75% coverage) word-focused inline comments
             if doc_url and extracted_paragraphs:
                 try:
                     docs_svc, _ = get_gdocs_service()
                     doc_id = extract_doc_id(doc_url)
                     
-                    bullets_payload = ["Here are the specific bullet points and entry lines extracted across the entire CV:\n"]
+                    bullets_payload = ["Here are bullet points and entries extracted across the candidate's CV:\n"]
                     for idx, ep in enumerate(extracted_paragraphs):
                         bullets_payload.append(f"[{idx}] {ep['text']}\n")
                     
                     bullets_payload.append(
-                        "\nINSTRUCTIONS FOR COMMENTS:\n"
-                        "For EVERY bullet point listed above, generate a completely unique, context-dependent coaching comment. "
-                        "1. You MUST explicitly name the specific company, role, society, or qualification (e.g. ISOC, Deloitte, Liskara, Wrestling, Forest School, GCSEs) in the text of the comment.\n"
-                        "2. Provide sharp, non-repeating feedback based on the attached scoring matrix PDF and training exemplars.\n"
-                        "3. Return strictly a JSON array of objects with keys 'index' (int) and 'comment' (string)."
+                        "\nINSTRUCTIONS FOR INLINE COMMENTS:\n"
+                        "1. Select the most impactful bullet points (aim for roughly 50% to 75% of the total entries list, skipping less critical lines).\n"
+                        "2. For each selected entry, identify a specific target phrase or key word within that line (e.g., 'A-Levels', 'Deloitte', 'LiDAR', 'Islamic Society', or a specific metric) to highlight.\n"
+                        "3. Write a completely unique, context-dependent coaching comment. NEVER mention the word 'matrix' or 'rubric'.\n"
+                        "4. Return strictly a JSON array of objects with keys: "
+                        "'index' (int), 'target_phrase' (string - exact snippet from the text to highlight), and 'comment' (string)."
                     )
                     
                     comment_response = client.models.generate_content(
@@ -202,29 +201,48 @@ if cv_target is not None and st.button("Generate Matrix-Driven Review"):
                     )
                     
                     comment_data = json.loads(comment_response.text)
-                    comment_map = {item['index']: item['comment'] for item in comment_data if 'index' in item and 'comment' in item}
-                    
                     requests = []
-                    for idx, ep in enumerate(extracted_paragraphs):
-                        if idx in comment_map:
-                            requests.append({
-                                'insertComment': {
-                                    'content': comment_map[idx],
-                                    'range': {
-                                        'startIndex': ep['startIndex'],
-                                        'endIndex': ep['endIndex']
+                    
+                    for item in comment_data:
+                        if 'index' in item and 'comment' in item:
+                            idx = item['index']
+                            if 0 <= idx < len(extracted_paragraphs):
+                                ep = extracted_paragraphs[idx]
+                                full_text = ep['text']
+                                target_phrase = item.get('target_phrase', '')
+                                
+                                # Default range: highlight target phrase if found, otherwise highlight first 20 chars
+                                start_offset = 0
+                                end_offset = len(full_text)
+                                
+                                if target_phrase and target_phrase in full_text:
+                                    match_start = full_text.find(target_phrase)
+                                    start_offset = match_start
+                                    end_offset = match_start + len(target_phrase)
+                                else:
+                                    end_offset = min(25, len(full_text))
+                                
+                                anchor_start = ep['startIndex'] + start_offset
+                                anchor_end = ep['startIndex'] + end_offset
+                                
+                                requests.append({
+                                    'insertComment': {
+                                        'content': item['comment'],
+                                        'range': {
+                                            'startIndex': anchor_start,
+                                            'endIndex': anchor_end
+                                        }
                                     }
-                                }
-                            })
+                                })
                     
                     if requests:
                         docs_svc.documents().batchUpdate(
                             documentId=doc_id,
                             body={'requests': requests}
                         ).execute()
-                        st.success(f"Successfully posted {len(requests)} 100% unique, bespoke comments across the entire Google Doc!")
+                        st.success(f"Successfully posted {len(requests)} targeted, word-highlighted inline comments on your Google Doc!")
                     else:
-                        st.info("Review complete, but no comment mappings were returned.")
+                        st.info("Review complete, but no comments were returned.")
                 except Exception as doc_update_err:
                     st.error(f"Failed to post anchored comments to Google Doc: {doc_update_err}")
             
