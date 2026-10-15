@@ -26,7 +26,7 @@ client = genai.Client(api_key=api_key)
 # Helper function to initialize Google Docs/Drive API client from Streamlit secrets
 def get_gdocs_service():
     if "gcp_service_account" not in st.secrets:
-        return None
+        return None, None
     creds_dict = dict(st.secrets["gcp_service_account"])
     creds = service_account.Credentials.from_service_account_info(
         creds_dict,
@@ -41,7 +41,7 @@ def extract_doc_id(url_or_id):
         return match.group(1)
     return url_or_id.strip()
 
-# System prompt enforcing a natural, friendly, encouraging tone without forced bullet points
+# System prompt enforcing natural tone + GCSE/A-level single line rule
 system_prompt_content = (
     "You are an expert executive career coach reviewing CVs. "
     "Provide constructive, encouraging feedback in a natural, conversational WhatsApp style. "
@@ -69,17 +69,21 @@ if uploaded_file is not None:
 elif doc_url:
     docs_service, drive_service = get_gdocs_service()
     if docs_service:
-        doc_id = extract_doc_id(doc_url)
-        doc = docs_service.documents().get(documentId=doc_id).execute()
-        
-        # Extract text from doc body
-        doc_content = doc.get('body').get('content')
-        for element in doc_content:
-            if 'paragraph' in element:
-                for elem in element['paragraph'].get('elements', []):
-                    if 'textRun' in elem:
-                        cv_text_content += elem['textRun'].get('content')
-        cv_target = f"Review this CV text content extracted from a Google Doc:\n{cv_text_content}"
+        try:
+            doc_id = extract_doc_id(doc_url)
+            doc = docs_service.documents().get(documentId=doc_id).execute()
+            
+            # Extract text from doc body
+            doc_content = doc.get('body').get('content')
+            for element in doc_content:
+                if 'paragraph' in element:
+                    for elem in element['paragraph'].get('elements', []):
+                        if 'textRun' in elem:
+                            cv_text_content += elem['textRun'].get('content')
+            cv_target = f"Review this CV text content extracted from a Google Doc:\n{cv_text_content}"
+        except Exception as fetch_err:
+            st.error(f"Failed to fetch Google Doc. Make sure it is shared with your service account email as an Editor! Details: {fetch_err}")
+            st.stop()
     else:
         st.error("Google Service Account credentials missing in Streamlit secrets!")
         st.stop()
@@ -105,20 +109,23 @@ if cv_target is not None and st.button("Generate Review"):
             st.subheader("WhatsApp Text Output:")
             st.text_area("Copy message below:", value=response.text, height=300)
             
-            # If a Google Doc URL was provided, also post comment via Drive API
+            # If a Google Doc URL was provided, post comment via Drive API with explicit error reporting
             if doc_url:
-                _, drive_svc = get_gdocs_service()
-                doc_id = extract_doc_id(doc_url)
-                
-                comment_body = {
-                    'content': f"🤖 AI CV Reviewer Feedback:\n\n{response.text}"
-                }
-                drive_svc.comments().create(
-                    fileId=doc_id,
-                    body=comment_body,
-                    fields='id'
-                ).execute()
-                st.info("Successfully posted anchored comments directly onto your Google Doc!")
+                try:
+                    _, drive_svc = get_gdocs_service()
+                    doc_id = extract_doc_id(doc_url)
+                    
+                    comment_body = {
+                        'content': f"🤖 AI CV Reviewer Feedback:\n\n{response.text}"
+                    }
+                    drive_svc.comments().create(
+                        fileId=doc_id,
+                        body=comment_body,
+                        fields='id'
+                    ).execute()
+                    st.success("Successfully posted comment directly onto your Google Doc!")
+                except Exception as comment_err:
+                    st.error(f"Failed to post comment to Google Doc: {comment_err}")
             
         except Exception as e:
             st.error(f"An error occurred during generation: {e}")
