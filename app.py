@@ -42,50 +42,63 @@ def extract_doc_id(url_or_id):
         return match.group(1)
     return url_or_id.strip()
 
-# Dynamic exemplar loader to read training files from the 'samples/' directory
-def load_exemplars():
-    exemplar_text = ""
-    # Ensure samples directory exists locally so it doesn't throw errors
+# Dynamic loader: reads text samples from 'samples/' AND uploads your root scoring matrix PDF
+def load_training_materials():
+    extra_contents = []
+    
+    # 1. Load text files from the samples folder
     if not os.path.exists("samples"):
         os.makedirs("samples")
     
     sample_files = glob.glob("samples/*.txt")
+    text_corpus = ""
     if sample_files:
-        exemplar_text += "\n--- EXEMPLAR CVs & SAMPLE COACH FEEDBACK FOR TRAINING ---\n"
+        text_corpus += "\n--- EXEMPLAR CVs & COACH FEEDBACK ---\n"
         for filepath in sample_files:
             try:
                 with open(filepath, "r", encoding="utf-8") as f:
-                    exemplar_text += f"\nFile ({os.path.basename(filepath)}):\n"
-                    exemplar_text += f.read() + "\n"
+                    text_corpus += f"\nFile ({os.path.basename(filepath)}):\n" + f.read() + "\n"
             except Exception:
                 pass
-        exemplar_text += "--- END OF EXAMPLES ---\n\n"
-    return exemplar_text
+        text_corpus += "--- END OF SAMPLES ---\n\n"
+        if text_corpus.strip():
+            extra_contents.append(text_corpus)
 
-# Load exemplars dynamically into context
-exemplars_context = load_exemplars()
+    # 2. Find and upload your scoring matrix PDF from the main folder
+    matrix_pdfs = glob.glob("*scoring*matrix*.pdf") or glob.glob("*matrix*.pdf") or glob.glob("*.pdf")
+    for pdf_path in matrix_pdfs:
+        try:
+            uploaded_pdf = client.files.upload(file=pdf_path)
+            extra_contents.append(uploaded_pdf)
+            break # Upload the first matching scoring matrix PDF found
+        except Exception:
+            pass
+            
+    return extra_contents
 
-# System prompt combining style instructions, training exemplars, and strict core rules
+# Load training materials dynamically into context
+training_materials = load_training_materials()
+
+# System prompt incorporating style exemplars, scoring matrix PDF, and strict rules
 system_prompt_content = (
     "You are an expert executive career coach reviewing student and professional CVs. "
-    "Your tone must strictly match the style, warmth, and depth demonstrated in the sample feedback provided below.\n\n"
-    f"{exemplars_context}"
+    "Your tone must strictly match the style, warmth, and depth demonstrated in the sample feedback provided. "
+    "You must rigorously evaluate the CV against the attached scoring matrix PDF, explicitly identifying what meets the criteria, what is strong/important, and what critical elements are lacking.\n\n"
     "Core Rules to Enforce Across the CV:\n"
-    "1. Candidates must always keep GCSEs and A-levels on their CVs, restricted strictly to a single line rather than dropping them or splitting them across multiple lines[cite: 1, 2, 3].\n"
-    "2. Your WhatsApp summary must be a warm, natural, conversational message (zero markdown asterisks, zero bolding, zero scores)[cite: 1, 2, 3].\n"
-    "3. Review the entire CV comprehensively from top to bottom (Education, Work Experience, Leadership, and Skills).\n"
-    "4. Check for timeline consistency, clear dates, hard skills (like Excel modelling or specific tools), and strong action verbs with commercial metrics[cite: 1, 2, 3]."
+    "1. Candidates must always keep GCSEs and A-levels on their CVs, restricted strictly to a single line.\n"
+    "2. Your WhatsApp summary must be a warm, natural, conversational message (zero markdown asterisks, zero bolding, zero scores).\n"
+    "3. Perform a comprehensive, deep-dive review across all sections (Education, Work Experience, Leadership, and Skills).\n"
+    "4. Explicitly highlight matrix-driven strengths and missing criteria."
 )
 
 st.title("📱 WhatsApp & Docs CV Reviewer")
-st.write("Upload a CV file or paste a native Google Doc link for a complete, deep-dive review powered by your training samples.")
+st.write("Upload a CV file or paste a native Google Doc link for a complete review driven by your scoring matrix PDF and training samples.")
 
 # Input options
 uploaded_file = st.file_uploader("Upload Candidate CV (PDF or TXT)", type=["pdf", "txt"])
 doc_url = st.text_input("Or paste native Google Doc Link (Optional - adds targeted inline comments)")
 
-cv_text_content = ""
-doc_sections = {}
+cv_target = None
 
 if uploaded_file is not None:
     with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(uploaded_file.name)[1]) as tmp_file:
@@ -102,103 +115,105 @@ elif doc_url:
             doc_id = extract_doc_id(doc_url)
             document = docs_service.documents().get(documentId=doc_id).execute()
             
-            # Extract text and track section positions for anchored comments
+            cv_text_content = ""
             doc_content = document.get('body').get('content')
             for element in doc_content:
                 if 'paragraph' in element:
-                    p_text = ""
-                    start_idx = element.get('startIndex')
-                    end_idx = element.get('endIndex')
                     for elem in element['paragraph'].get('elements', []):
                         if 'textRun' in elem:
-                            p_text += elem['textRun'].get('content')
-                    
-                    cleaned_line = p_text.strip().lower()
-                    cv_text_content += p_text
-                    
-                    # Track major sections across the entire CV for precise anchoring
-                    if "education" in cleaned_line:
-                        doc_sections['education'] = {'startIndex': start_idx, 'endIndex': end_idx}
-                    elif "work experience" in cleaned_line:
-                        doc_sections['work experience'] = {'startIndex': start_idx, 'endIndex': end_idx}
-                    elif "leadership" in cleaned_line:
-                        doc_sections['leadership'] = {'startIndex': start_idx, 'endIndex': end_idx}
-                    elif "skills" in cleaned_line or "interests" in cleaned_line:
-                        doc_sections['skills'] = {'startIndex': start_idx, 'endIndex': end_idx}
-
+                            cv_text_content += elem['textRun'].get('content')
             cv_target = f"Review this complete CV text content extracted from a Google Doc:\n{cv_text_content}"
         except Exception as fetch_err:
-            st.error(f"Failed to fetch Google Doc. Make sure it is a native Google Doc (not an Office file) and shared with your service account email as an Editor! Details: {fetch_err}")
+            st.error(f"Failed to fetch Google Doc. Make sure it is a native Google Doc and shared with your service account email as an Editor! Details: {fetch_err}")
             st.stop()
     else:
         st.error("Google Service Account credentials missing in Streamlit secrets!")
         st.stop()
-else:
-    cv_target = None
 
-if cv_target is not None and st.button("Generate Comprehensive Review"):
-    with st.spinner("Analyzing CV using training samples and deep-dive logic..."):
+if cv_target is not None and st.button("Generate Matrix-Driven Review"):
+    with st.spinner("Analyzing CV against your scoring matrix PDF and training exemplars..."):
         try:
+            # Bundle training materials (PDF scoring matrix + text exemplars) + CV target
+            contents_payload = training_materials + [
+                cv_target,
+                (
+                    "Perform a meticulous review of this CV against the attached scoring matrix PDF and training samples. Provide:\n"
+                    "1. WHATSAPP SUMMARY: A warm, natural, conversational message highlighting key strengths, importance, and what's lacking according to the matrix (no markdown, no bolding, no scores).\n"
+                    "2. SECTION COMMENTS: Targeted, professional improvement notes for Education, Work Experience, Leadership, and Skills based on the rubric criteria."
+                )
+            ]
+            
             response = client.models.generate_content(
                 model='gemini-3.8-flash',
-                contents=[
-                    cv_target,
-                    (
-                        "Perform a meticulous, complete review of this CV from top to bottom, matching the exact style and coaching depth of the training samples. Provide:\n"
-                        "1. WHATSAPP SUMMARY: A warm, natural, conversational message (no markdown, no bolding, no scores).\n"
-                        "2. SECTION COMMENTS: Specific, professional improvement notes for Education, Work Experience, Leadership, and Skills."
-                    )
-                ],
+                contents=contents_payload,
                 config=types.GenerateContentConfig(
                     system_instruction=system_prompt_content,
                     temperature=0.7
                 )
             )
             
-            st.success("Deep-Dive Review Complete!")
+            st.success("Matrix-Driven Review Complete!")
             st.subheader("WhatsApp Text Output:")
             st.text_area("Copy message below:", value=response.text, height=300)
             
-            # If a Google Doc URL was provided, insert targeted anchored comments into matching sections
-            if doc_url and doc_sections:
+            # If a Google Doc URL was provided, re-fetch section positions and insert comments
+            if doc_url:
                 try:
                     docs_svc, _ = get_gdocs_service()
                     doc_id = extract_doc_id(doc_url)
+                    document = docs_svc.documents().get(documentId=doc_id).execute()
+                    
+                    doc_sections = {}
+                    doc_content = document.get('body').get('content')
+                    for element in doc_content:
+                        if 'paragraph' in element:
+                            p_text = ""
+                            start_idx = element.get('startIndex')
+                            end_idx = element.get('endIndex')
+                            for elem in element['paragraph'].get('elements', []):
+                                if 'textRun' in elem:
+                                    p_text += elem['textRun'].get('content')
+                            cleaned_line = p_text.strip().lower()
+                            
+                            if "education" in cleaned_line:
+                                doc_sections['education'] = {'startIndex': start_idx, 'endIndex': end_idx}
+                            elif "work experience" in cleaned_line:
+                                doc_sections['work experience'] = {'startIndex': start_idx, 'endIndex': end_idx}
+                            elif "leadership" in cleaned_line:
+                                doc_sections['leadership'] = {'startIndex': start_idx, 'endIndex': end_idx}
+                            elif "skills" in cleaned_line or "interests" in cleaned_line:
+                                doc_sections['skills'] = {'startIndex': start_idx, 'endIndex': end_idx}
                     
                     requests = []
-                    
                     if "education" in doc_sections:
                         edu = doc_sections["education"]
                         requests.append({
                             'insertComment': {
-                                'content': "Education Feedback:\n• Consolidate A-levels and GCSEs strictly onto a single line to save vertical space[cite: 1, 2, 3].\n• Highlight top-decile rankings or specific academic prizes clearly[cite: 1, 2, 3].",
+                                'content': "Education Feedback (Matrix Rubric):\n• Consolidate A-levels and GCSEs strictly onto a single line.\n• Highlight top-decile rankings or specific academic prizes.",
                                 'range': {'startIndex': edu['startIndex'], 'endIndex': edu['endIndex']}
                             }
                         })
-                    
                     if "work experience" in doc_sections:
                         work = doc_sections["work experience"]
                         requests.append({
                             'insertComment': {
-                                'content': "Work Experience Feedback:\n• Ensure every bullet starts with a strong action verb and robust commercial metrics[cite: 1, 2, 3].\n• Keep corporate internship roles front and center; fold explanatory company descriptions directly into the lead bullet[cite: 1, 2, 3].",
+                                'content': "Work Experience Feedback (Matrix Rubric):\n• Ensure bullets lead with strong action verbs and quantitative metrics.\n• Remove standalone company descriptions.",
                                 'range': {'startIndex': work['startIndex'], 'endIndex': work['endIndex']}
                             }
                         })
-                    
                     if "leadership" in doc_sections:
                         lead = doc_sections["leadership"]
                         requests.append({
                             'insertComment': {
-                                'content': "Leadership Feedback:\n• Retain impressive sponsorship and attendance metrics[cite: 1, 2, 3].\n• Keep descriptions concise (max 2 lines per bullet)[cite: 1, 2, 3].",
+                                'content': "Leadership Feedback (Matrix Rubric):\n• Verify scale metrics (team size, funding figures, attendance).\n• Keep descriptions punchy and concise.",
                                 'range': {'startIndex': lead['startIndex'], 'endIndex': lead['endIndex']}
                             }
                         })
-                        
                     if "skills" in doc_sections:
                         skl = doc_sections["skills"]
                         requests.append({
                             'insertComment': {
-                                'content': "Skills & Interests Feedback:\n• Add a dedicated line for technical/hard skills (e.g., Advanced Excel, financial modelling, Python) alongside your sports achievements[cite: 1, 2, 3].",
+                                'content': "Skills & Interests Feedback (Matrix Rubric):\n• Add a dedicated hard skills line (e.g., Advanced Excel, financial modelling, Python) to fill missing technical competencies.",
                                 'range': {'startIndex': skl['startIndex'], 'endIndex': skl['endIndex']}
                             }
                         })
@@ -208,9 +223,7 @@ if cv_target is not None and st.button("Generate Comprehensive Review"):
                             documentId=doc_id,
                             body={'requests': requests}
                         ).execute()
-                        st.success("Successfully posted targeted, section-specific bullet points onto your native Google Doc!")
-                    else:
-                        st.info("Review generated, but couldn't map specific section headers for anchoring.")
+                        st.success("Successfully posted matrix-driven anchored comments onto your Google Doc!")
                 except Exception as doc_update_err:
                     st.error(f"Failed to post anchored comments to Google Doc: {doc_update_err}")
             
