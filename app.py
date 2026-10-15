@@ -55,9 +55,9 @@ if uploaded_file is not None:
             # Clean up the local temporary file
             os.unlink(tmp_path)
             
-            # Prompt the model using your system instructions and the uploaded file
+            # Prompt the model using your system instructions and the uploaded file with gemini-3.8-flash
             response = client.models.generate_content(
-                model='gemini-2.5-flash',
+                model='gemini-3.8-flash',
                 contents=[
                     uploaded_gemini_file,
                     "Review this CV following your master prompt guidelines. Output only natural, unstructured WhatsApp text messages with zero markdown asterisks and zero scores."
