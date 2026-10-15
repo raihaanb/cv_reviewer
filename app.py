@@ -78,7 +78,7 @@ def load_training_materials():
 
 training_materials = load_training_materials()
 
-# Strict system prompt embodying your exact rules
+# Strict system prompt embodying your exact rules (dates completely excluded)
 system_prompt_content = (
     "You are an expert executive career coach reviewing student and professional CVs.\n"
     "Your tone, rigor, and coaching style must strictly match the loaded training samples provided. Avoid all generic AI filler and corporate slop.\n\n"
@@ -88,7 +88,8 @@ system_prompt_content = (
     "3. CONTEXT-DEPENDENT: You MUST explicitly mention specific details, roles, companies, or projects (e.g., ISOC, Deloitte, Liskara, Wrestling, Forest School, GCSEs) in the text of each comment.\n"
     "4. NO HEADINGS ALLOWED: Never comment on section titles or headers. Comments must anchor strictly to individual bullet points, specific achievement entries, or specific target words/phrases.\n"
     "5. SELECTIVE HIGH-IMPACT COVERAGE: Aim for roughly 40-75% of the most impactful bullet points across the document from top to bottom.\n"
-    "6. WHATSAPP SUMMARY FORMAT:\n"
+    "6. NEVER MENTION DATES: Completely ignore dates, timelines, or scheduling; focus strictly on impact, content, and phrasing.\n"
+    "7. WHATSAPP SUMMARY FORMAT:\n"
     "   - Must start with a bland, generic opening line (e.g., 'It looks really good overall!'). No super positive or over-the-top summary praise.\n"
     "   - Provide a concise medium-level overview of key areas to refine.\n"
     "   - Must end with: 'Let me know if you have any questions and feel free to send a re-drafted version.'\n"
@@ -162,7 +163,7 @@ if cv_target is not None and st.button("Generate Review"):
                     (
                         "Write a WhatsApp review message following these exact rules:\n"
                         "1. Start with a bland, generic opening line (e.g., 'It looks really good overall!'). Do not include over-the-top praise.\n"
-                        "2. Provide a medium-level overview of key areas to refine.\n"
+                        "2. Provide a medium-level overview of key areas to refine (never mention dates).\n"
                         "3. End with exactly: 'Let me know if you have any questions and feel free to send a re-drafted version.'\n"
                         "4. Do NOT mention the word matrix or rubric. Do NOT use markdown asterisks, bolding, or numerical scores."
                     )
@@ -190,66 +191,4 @@ if cv_target is not None and st.button("Generate Review"):
                     bullets_payload.append(
                         "\nINSTRUCTIONS FOR INLINE COMMENTS:\n"
                         "1. Select the most impactful bullet points (aim for roughly 50% to 75% of the total entries list, skipping less critical lines).\n"
-                        "2. For each selected entry, identify a specific target phrase or key word within that line (e.g., 'A-Levels', 'Deloitte', 'LiDAR', 'Islamic Society', or a specific metric) to highlight.\n"
-                        "3. Write a completely unique, context-dependent coaching comment. NEVER mention the word 'matrix' or 'rubric'.\n"
-                        "4. Return strictly a JSON array of objects with keys: "
-                        "'index' (int), 'target_phrase' (string - exact snippet from the text to highlight), and 'comment' (string)."
-                    )
-                    
-                    comment_response = client.models.generate_content(
-                        model='gemini-3.8-flash',
-                        contents=training_materials + bullets_payload,
-                        config=types.GenerateContentConfig(
-                            system_instruction=system_prompt_content,
-                            response_mime_type="application/json",
-                            temperature=0.7
-                        )
-                    )
-                    
-                    comment_data = json.loads(comment_response.text)
-                    requests = []
-                    
-                    for item in comment_data:
-                        if 'index' in item and 'comment' in item:
-                            idx = item['index']
-                            if 0 <= idx < len(extracted_paragraphs):
-                                ep = extracted_paragraphs[idx]
-                                full_text = ep['text']
-                                target_phrase = item.get('target_phrase', '')
-                                
-                                start_offset = 0
-                                end_offset = len(full_text)
-                                
-                                if target_phrase and target_phrase in full_text:
-                                    match_start = full_text.find(target_phrase)
-                                    start_offset = match_start
-                                    end_offset = match_start + len(target_phrase)
-                                else:
-                                    end_offset = min(25, len(full_text))
-                                
-                                anchor_start = ep['startIndex'] + start_offset
-                                anchor_end = ep['startIndex'] + end_offset
-                                
-                                requests.append({
-                                    'insertComment': {
-                                        'content': item['comment'],
-                                        'range': {
-                                            'startIndex': anchor_start,
-                                            'endIndex': anchor_end
-                                        }
-                                    }
-                                })
-                    
-                    if requests:
-                        docs_svc.documents().batchUpdate(
-                            documentId=doc_id,
-                            body={'requests': requests}
-                        ).execute()
-                        st.success(f"Successfully posted {len(requests)} targeted, word-highlighted inline comments on your Google Doc!")
-                    else:
-                        st.info("Review complete, but no comments were returned.")
-                except Exception as doc_update_err:
-                    st.error(f"Failed to post anchored comments to Google Doc: {doc_update_err}")
-            
-        except Exception as e:
-            st.error(f"An error occurred during generation: {e}")
+                        "2. For each selected entry, identify a specific target phrase or key word within that line (e.g., 'A-Levels', 'Del
