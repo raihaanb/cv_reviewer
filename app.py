@@ -20,23 +20,29 @@ if not api_key:
 
 client = genai.Client(api_key=api_key)
 
-# Updated system prompt enforcing a blunt, honest, unsparing tone
-system_prompt_content = (
-    "You are a brutally honest executive career coach. "
-    "Review CVs with complete frankness and zero sugarcoating. "
-    "Call out weak bullet points, fluff, and poor positioning directly. "
-    "Maintain a casual WhatsApp text style, but be sharp, blunt, and tough. "
-    "Never use markdown asterisks, bolding, formatting symbols, or estimated numerical scores."
-)
+# Helper function to load local master files if available
+def load_local_asset(filename):
+    if os.path.exists(filename):
+        with open(filename, "r", encoding="utf-8") as f:
+            return f.read()
+    return ""
+
+system_prompt_content = load_local_asset("SYSTEM_PROMPT.md")
+if not system_prompt_content:
+    system_prompt_content = (
+        "You are an expert executive career coach reviewing CVs. "
+        "Provide direct, casual, unstructured WhatsApp-style text feedback. "
+        "Never use asterisks, bolding, markdown formatting, or estimated scores."
+    )
 
 st.title("📱 WhatsApp CV Reviewer")
-st.write("Drop a candidate's CV below for unsparing, blunt feedback.")
+st.write("Drop a candidate's CV below to generate direct, casual, human-sounding WhatsApp feedback.")
 
 # File uploader for candidate CVs (supports PDF or text)
 uploaded_file = st.file_uploader("Upload Candidate CV (PDF or TXT)", type=["pdf", "txt"])
 
 if uploaded_file is not None:
-    with st.spinner("Tearing down this CV..."):
+    with st.spinner("Reviewing CV..."):
         try:
             # Save the uploaded file temporarily so the SDK can read it securely from disk
             with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(uploaded_file.name)[1]) as tmp_file:
@@ -49,12 +55,12 @@ if uploaded_file is not None:
             # Clean up the local temporary file
             os.unlink(tmp_path)
             
-            # Prompt the model using your blunt instructions and the uploaded file
+            # Prompt the model using your system instructions and the uploaded file with gemini-3.8-flash
             response = client.models.generate_content(
                 model='gemini-3.8-flash',
                 contents=[
                     uploaded_gemini_file,
-                    "Tear this CV apart honestly. Give me raw, blunt, unsparing feedback like a strict mentor. Output only casual WhatsApp text messages with zero markdown asterisks and zero scores."
+                    "Review this CV following your master prompt guidelines. Output only natural, unstructured WhatsApp text messages with zero markdown asterisks and zero scores."
                 ],
                 config=types.GenerateContentConfig(
                     system_instruction=system_prompt_content,
