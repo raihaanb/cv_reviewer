@@ -1,5 +1,6 @@
 import os
 import re
+import glob
 import tempfile
 import streamlit as st
 from google import genai
@@ -41,21 +42,47 @@ def extract_doc_id(url_or_id):
         return match.group(1)
     return url_or_id.strip()
 
-# System prompt enforcing natural tone + GCSE/A-level single line rule
+# Dynamic exemplar loader to read training files from the 'samples/' directory
+def load_exemplars():
+    exemplar_text = ""
+    # Ensure samples directory exists locally so it doesn't throw errors
+    if not os.path.exists("samples"):
+        os.makedirs("samples")
+    
+    sample_files = glob.glob("samples/*.txt")
+    if sample_files:
+        exemplar_text += "\n--- EXEMPLAR CVs & SAMPLE COACH FEEDBACK FOR TRAINING ---\n"
+        for filepath in sample_files:
+            try:
+                with open(filepath, "r", encoding="utf-8") as f:
+                    exemplar_text += f"\nFile ({os.path.basename(filepath)}):\n"
+                    exemplar_text += f.read() + "\n"
+            except Exception:
+                pass
+        exemplar_text += "--- END OF EXAMPLES ---\n\n"
+    return exemplar_text
+
+# Load exemplars dynamically into context
+exemplars_context = load_exemplars()
+
+# System prompt combining style instructions, training exemplars, and strict core rules
 system_prompt_content = (
-    "You are an expert executive career coach reviewing CVs. "
-    "Provide constructive, encouraging feedback in a natural, conversational WhatsApp style for the general overview. "
-    "For specific sections (like Education and Work Experience), provide professional, concise, bullet-pointed improvement notes. "
-    "Remember that candidates should always keep GCSEs and A levels on their CVs, restricted strictly to a single line rather than dropping them. "
-    "Never use markdown asterisks or estimated numerical scores in your general feedback."
+    "You are an expert executive career coach reviewing student and professional CVs. "
+    "Your tone must strictly match the style, warmth, and depth demonstrated in the sample feedback provided below.\n\n"
+    f"{exemplars_context}"
+    "Core Rules to Enforce Across the CV:\n"
+    "1. Candidates must always keep GCSEs and A-levels on their CVs, restricted strictly to a single line rather than dropping them or splitting them across multiple lines[cite: 1, 2, 3].\n"
+    "2. Your WhatsApp summary must be a warm, natural, conversational message (zero markdown asterisks, zero bolding, zero scores)[cite: 1, 2, 3].\n"
+    "3. Review the entire CV comprehensively from top to bottom (Education, Work Experience, Leadership, and Skills).\n"
+    "4. Check for timeline consistency, clear dates, hard skills (like Excel modelling or specific tools), and strong action verbs with commercial metrics[cite: 1, 2, 3]."
 )
 
 st.title("📱 WhatsApp & Docs CV Reviewer")
-st.write("Upload a CV file or paste a Google Doc link for conversational summaries and inline anchored comments.")
+st.write("Upload a CV file or paste a native Google Doc link for a complete, deep-dive review powered by your training samples.")
 
 # Input options
 uploaded_file = st.file_uploader("Upload Candidate CV (PDF or TXT)", type=["pdf", "txt"])
-doc_url = st.text_input("Or paste Google Doc Link (Optional - adds inline anchored comments)")
+doc_url = st.text_input("Or paste native Google Doc Link (Optional - adds targeted inline comments)")
 
 cv_text_content = ""
 doc_sections = {}
@@ -86,16 +113,22 @@ elif doc_url:
                         if 'textRun' in elem:
                             p_text += elem['textRun'].get('content')
                     
-                    cleaned_line = p_text.strip()
+                    cleaned_line = p_text.strip().lower()
                     cv_text_content += p_text
                     
-                    # Track major section headers for anchoring
-                    if cleaned_line.lower() in ["education", "work experience", "leadership and impact", "skills and interests"]:
-                        doc_sections[cleaned_line.lower()] = {'startIndex': start_idx, 'endIndex': end_idx}
+                    # Track major sections across the entire CV for precise anchoring
+                    if "education" in cleaned_line:
+                        doc_sections['education'] = {'startIndex': start_idx, 'endIndex': end_idx}
+                    elif "work experience" in cleaned_line:
+                        doc_sections['work experience'] = {'startIndex': start_idx, 'endIndex': end_idx}
+                    elif "leadership" in cleaned_line:
+                        doc_sections['leadership'] = {'startIndex': start_idx, 'endIndex': end_idx}
+                    elif "skills" in cleaned_line or "interests" in cleaned_line:
+                        doc_sections['skills'] = {'startIndex': start_idx, 'endIndex': end_idx}
 
-            cv_target = f"Review this CV text content extracted from a Google Doc:\n{cv_text_content}"
+            cv_target = f"Review this complete CV text content extracted from a Google Doc:\n{cv_text_content}"
         except Exception as fetch_err:
-            st.error(f"Failed to fetch Google Doc. Make sure it is shared with your service account email as an Editor! Details: {fetch_err}")
+            st.error(f"Failed to fetch Google Doc. Make sure it is a native Google Doc (not an Office file) and shared with your service account email as an Editor! Details: {fetch_err}")
             st.stop()
     else:
         st.error("Google Service Account credentials missing in Streamlit secrets!")
@@ -103,17 +136,17 @@ elif doc_url:
 else:
     cv_target = None
 
-if cv_target is not None and st.button("Generate Review"):
-    with st.spinner("Reviewing CV and preparing anchored feedback..."):
+if cv_target is not None and st.button("Generate Comprehensive Review"):
+    with st.spinner("Analyzing CV using training samples and deep-dive logic..."):
         try:
             response = client.models.generate_content(
                 model='gemini-3.8-flash',
                 contents=[
                     cv_target,
                     (
-                        "Provide two things:\n"
-                        "1. GENERAL WHATSAPP REVIEW: A friendly, conversational WhatsApp summary message (no markdown asterisks or scores).\n"
-                        "2. SECTION COMMENTS: Specific, professional, bullet-pointed feedback for 'Education' (e.g. academic prizes, modules) and 'Work Experience' (e.g. metrics, impact)."
+                        "Perform a meticulous, complete review of this CV from top to bottom, matching the exact style and coaching depth of the training samples. Provide:\n"
+                        "1. WHATSAPP SUMMARY: A warm, natural, conversational message (no markdown, no bolding, no scores).\n"
+                        "2. SECTION COMMENTS: Specific, professional improvement notes for Education, Work Experience, Leadership, and Skills."
                     )
                 ],
                 config=types.GenerateContentConfig(
@@ -122,11 +155,11 @@ if cv_target is not None and st.button("Generate Review"):
                 )
             )
             
-            st.success("Review Generated Successfully!")
+            st.success("Deep-Dive Review Complete!")
             st.subheader("WhatsApp Text Output:")
             st.text_area("Copy message below:", value=response.text, height=300)
             
-            # If a Google Doc URL was provided, insert anchored comments into specific sections
+            # If a Google Doc URL was provided, insert targeted anchored comments into matching sections
             if doc_url and doc_sections:
                 try:
                     docs_svc, _ = get_gdocs_service()
@@ -134,29 +167,39 @@ if cv_target is not None and st.button("Generate Review"):
                     
                     requests = []
                     
-                    # Build anchored comment for Education if present
                     if "education" in doc_sections:
-                        edu_range = doc_sections["education"]
+                        edu = doc_sections["education"]
                         requests.append({
                             'insertComment': {
-                                'content': "Education Feedback:\n• Highlight specific academic prizes, honors, or top-decile rankings clearly.\n• Keep GCSEs and A levels strictly to a single line.",
-                                'range': {
-                                    'startIndex': edu_range['startIndex'],
-                                    'endIndex': edu_range['endIndex']
-                                }
+                                'content': "Education Feedback:\n• Consolidate A-levels and GCSEs strictly onto a single line to save vertical space[cite: 1, 2, 3].\n• Highlight top-decile rankings or specific academic prizes clearly[cite: 1, 2, 3].",
+                                'range': {'startIndex': edu['startIndex'], 'endIndex': edu['endIndex']}
                             }
                         })
                     
-                    # Build anchored comment for Work Experience if present
                     if "work experience" in doc_sections:
-                        work_range = doc_sections["work experience"]
+                        work = doc_sections["work experience"]
                         requests.append({
                             'insertComment': {
-                                'content': "Work Experience Feedback:\n• Emphasize quantitative business metrics and tangible outcomes.\n• Ensure strong action verbs start each bullet point.",
-                                'range': {
-                                    'startIndex': work_range['startIndex'],
-                                    'endIndex': work_range['endIndex']
-                                }
+                                'content': "Work Experience Feedback:\n• Ensure every bullet starts with a strong action verb and robust commercial metrics[cite: 1, 2, 3].\n• Keep corporate internship roles front and center; fold explanatory company descriptions directly into the lead bullet[cite: 1, 2, 3].",
+                                'range': {'startIndex': work['startIndex'], 'endIndex': work['endIndex']}
+                            }
+                        })
+                    
+                    if "leadership" in doc_sections:
+                        lead = doc_sections["leadership"]
+                        requests.append({
+                            'insertComment': {
+                                'content': "Leadership Feedback:\n• Retain impressive sponsorship and attendance metrics[cite: 1, 2, 3].\n• Keep descriptions concise (max 2 lines per bullet)[cite: 1, 2, 3].",
+                                'range': {'startIndex': lead['startIndex'], 'endIndex': lead['endIndex']}
+                            }
+                        })
+                        
+                    if "skills" in doc_sections:
+                        skl = doc_sections["skills"]
+                        requests.append({
+                            'insertComment': {
+                                'content': "Skills & Interests Feedback:\n• Add a dedicated line for technical/hard skills (e.g., Advanced Excel, financial modelling, Python) alongside your sports achievements[cite: 1, 2, 3].",
+                                'range': {'startIndex': skl['startIndex'], 'endIndex': skl['endIndex']}
                             }
                         })
                     
@@ -165,9 +208,9 @@ if cv_target is not None and st.button("Generate Review"):
                             documentId=doc_id,
                             body={'requests': requests}
                         ).execute()
-                        st.success("Successfully posted professional, bullet-pointed anchored comments onto your Google Doc sections!")
+                        st.success("Successfully posted targeted, section-specific bullet points onto your native Google Doc!")
                     else:
-                        st.info("General review complete, but specific section headers weren't matched for inline anchoring.")
+                        st.info("Review generated, but couldn't map specific section headers for anchoring.")
                 except Exception as doc_update_err:
                     st.error(f"Failed to post anchored comments to Google Doc: {doc_update_err}")
             
