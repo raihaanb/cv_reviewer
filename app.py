@@ -1,4 +1,5 @@
 import os
+import tempfile
 import streamlit as st
 from google import genai
 from google.genai import types
@@ -41,16 +42,18 @@ st.write("Drop a candidate's CV below to generate direct, casual, human-sounding
 uploaded_file = st.file_uploader("Upload Candidate CV (PDF or TXT)", type=["pdf", "txt"])
 
 if uploaded_file is not None:
-    file_bytes = uploaded_file.read()
-    file_mime = uploaded_file.type if uploaded_file.type else "application/pdf"
-    
     with st.spinner("Reviewing CV..."):
         try:
-            # Upload the file to Gemini File API
-            uploaded_gemini_file = client.files.upload(
-                file=file_bytes,
-                config=types.UploadFileConfig(mime_type=file_mime)
-            )
+            # Save the uploaded file temporarily so the SDK can read it securely from disk
+            with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(uploaded_file.name)[1]) as tmp_file:
+                tmp_file.write(uploaded_file.getvalue())
+                tmp_path = tmp_file.name
+
+            # Upload the temporary file using the File API
+            uploaded_gemini_file = client.files.upload(file=tmp_path)
+            
+            # Clean up the local temporary file
+            os.unlink(tmp_path)
             
             # Prompt the model using your system instructions and the uploaded file
             response = client.models.generate_content(
@@ -68,7 +71,7 @@ if uploaded_file is not None:
             st.success("Review Generated Successfully!")
             st.subheader("WhatsApp Text Output:")
             
-            # Display plain text cleanly without markdown parsing issues
+            # Display plain text cleanly
             st.text_area("Copy message below:", value=response.text, height=300)
             
         except Exception as e:
